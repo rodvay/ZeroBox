@@ -69,10 +69,24 @@ namespace ZeroBox
             return Path.Combine(GetConfigDir(), "settings.ini");
         }
 
+        public static bool IsSafeRootedDir(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            try
+            {
+                string trimmed = path.Trim();
+                if (trimmed.Length < 3 || trimmed.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return false;
+                if (!Path.IsPathRooted(trimmed)) return false;
+                string full = Path.GetFullPath(trimmed);
+                return !string.IsNullOrEmpty(full) && full.Length >= 3;
+            }
+            catch { return false; }
+        }
+
         public string ResolveModulesRoot()
         {
-            if (!string.IsNullOrEmpty(CustomModulesDir)) return CustomModulesDir;
-            // Portable mode: if a "modules" folder already exists next to ZeroBox.exe, prefer it
+            if (IsSafeRootedDir(CustomModulesDir)) return Path.GetFullPath(CustomModulesDir.Trim());
+            // Portable mode: if a "ZeroBox_Modules" folder already exists next to ZeroBox.exe, prefer it
             try
             {
                 string exeDir = Path.GetDirectoryName(Application.ExecutablePath);
@@ -102,7 +116,7 @@ namespace ZeroBox
                     if (k == "Language" && (v == "en" || v == "tr" || v == "zh")) s.Language = v;
                     else if (k == "MinimizeToTray") s.MinimizeToTray = (v == "1");
                     else if (k == "UseMirror") s.UseMirror = (v == "1");
-                    else if (k == "CustomModulesDir") s.CustomModulesDir = v;
+                    else if (k == "CustomModulesDir" && IsSafeRootedDir(v)) s.CustomModulesDir = v;
                 }
             }
             catch { }
@@ -120,7 +134,7 @@ namespace ZeroBox
                 sb.AppendLine("Language=" + (Language ?? "en"));
                 sb.AppendLine("MinimizeToTray=" + (MinimizeToTray ? "1" : "0"));
                 sb.AppendLine("UseMirror=" + (UseMirror ? "1" : "0"));
-                if (!string.IsNullOrEmpty(CustomModulesDir)) sb.AppendLine("CustomModulesDir=" + CustomModulesDir);
+                if (IsSafeRootedDir(CustomModulesDir)) sb.AppendLine("CustomModulesDir=" + CustomModulesDir.Trim());
                 File.WriteAllText(p, sb.ToString(), Encoding.UTF8);
             }
             catch { }
@@ -135,6 +149,7 @@ namespace ZeroBox
         public const int DWMWA_CAPTION_COLOR = 35;
         public const int DWMWA_TEXT_COLOR = 36;
         public const uint MSGFLT_ALLOW = 1;
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
         public static readonly IntPtr HWND_BROADCAST = new IntPtr(0xFFFF);
         public static readonly uint WM_SHOW_EXISTING = RegisterWindowMessage("ZeroBox_ShowExistingWindow_v1");
@@ -142,6 +157,12 @@ namespace ZeroBox
 
         private const string StartupRunKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupValueName = "ZeroBox";
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int Left, Top, Right, Bottom;
+        }
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -167,6 +188,38 @@ namespace ZeroBox
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, int dwProcessId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageNameW(IntPtr hProcess, int dwFlags, StringBuilder lpExeName, ref int lpdwSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        // Works across UAC elevation boundaries (reads elevated process image path from non-elevated ZeroBox!)
+        public static string TryGetProcessImagePath(int pid)
+        {
+            IntPtr hProc = IntPtr.Zero;
+            try
+            {
+                hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (hProc == IntPtr.Zero) return "";
+                int cap = 1024;
+                StringBuilder sb = new StringBuilder(cap);
+                if (QueryFullProcessImageNameW(hProc, 0, sb, ref cap) && cap > 0)
+                    return sb.ToString(0, cap);
+            }
+            catch { }
+            finally
+            {
+                if (hProc != IntPtr.Zero) { try { CloseHandle(hProc); } catch { } }
+            }
+            return "";
+        }
 
         public static void EnableDpiAwareness()
         {
@@ -199,6 +252,11 @@ namespace ZeroBox
             catch { }
         }
 
+        private static string ExpectedStartupCommand()
+        {
+            return "\"" + Application.ExecutablePath + "\" --minimized";
+        }
+
         public static bool IsStartupEnabled()
         {
             try
@@ -206,7 +264,10 @@ namespace ZeroBox
                 using (RegistryKey k = Registry.CurrentUser.OpenSubKey(StartupRunKey, false))
                 {
                     if (k == null) return false;
-                    return !string.IsNullOrEmpty(k.GetValue(StartupValueName) as string);
+                    string val = k.GetValue(StartupValueName) as string;
+                    if (string.IsNullOrEmpty(val)) return false;
+                    // Verify entry still points to current ZeroBox.exe path (handles moved EXE cleanly)
+                    return val.IndexOf(Application.ExecutablePath, StringComparison.OrdinalIgnoreCase) >= 0;
                 }
             }
             catch { return false; }
@@ -219,7 +280,7 @@ namespace ZeroBox
                 using (RegistryKey k = Registry.CurrentUser.CreateSubKey(StartupRunKey))
                 {
                     if (k == null) return false;
-                    if (enable) k.SetValue(StartupValueName, "\"" + Application.ExecutablePath + "\" --minimized");
+                    if (enable) k.SetValue(StartupValueName, ExpectedStartupCommand());
                     else k.DeleteValue(StartupValueName, false);
                     return true;
                 }

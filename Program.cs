@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -78,7 +79,8 @@ namespace ZeroBox
 
     internal sealed class MainForm : Form
     {
-        private const string AppVersion = "1.0.0";
+        private const string AppVersion = "1.0.1";
+        private const string SelfReleaseUrl = "https://github.com/rodvay/ZeroBox/releases/latest";
 
         private readonly LaunchConfig _launch;
         private readonly ZeroBoxSettings _cfg;
@@ -89,6 +91,7 @@ namespace ZeroBox
         private bool _checkingUpdates;
         private bool _startupCached;
         private bool _allowRealClose;
+        private string _selfUpdateTag = "";
 
         private float _scale = 1.0f;
         private string _hoverId = "";
@@ -96,6 +99,7 @@ namespace ZeroBox
         private readonly Dictionary<string, Rectangle> _cardRects = new Dictionary<string, Rectangle>();
 
         private string _toastText = "";
+        private Color _toastColor = UiTheme.Emerald;
         private DateTime _toastUntil = DateTime.MinValue;
         private System.Windows.Forms.Timer _uiTimer;
         private NotifyIcon _trayIcon;
@@ -135,10 +139,15 @@ namespace ZeroBox
             KeyPreview = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
+            if (_launch.StartMinimized && !_launch.DemoMode)
+            {
+                ShowInTaskbar = false;
+                Opacity = 0.0;
+            }
+
             _scale = ComputeScale();
             RebuildFonts();
-            ClientSize = new Size(S(960), S(640));
-            MinimumSize = new Size(S(880), S(590));
+            ApplyClampedBounds(true);
 
             InitTray();
             _cardMenu = new ContextMenuStrip();
@@ -157,6 +166,27 @@ namespace ZeroBox
         }
 
         private int S(float v) { return (int)Math.Round(v * _scale); }
+
+        private void ApplyClampedBounds(bool setClientSize)
+        {
+            Rectangle wa;
+            try { wa = Screen.FromHandle(IsHandleCreated ? Handle : IntPtr.Zero).WorkingArea; }
+            catch { wa = Screen.PrimaryScreen.WorkingArea; }
+
+            int maxW = Math.Max(760, (int)(wa.Width * 0.94));
+            int maxH = Math.Max(520, (int)(wa.Height * 0.92));
+
+            int minW = Math.Min(S(880), maxW);
+            int minH = Math.Min(S(590), maxH);
+            MinimumSize = new Size(minW, minH);
+
+            if (setClientSize)
+            {
+                int cw = Math.Min(S(960), maxW - 16);
+                int ch = Math.Min(S(640), maxH - 36);
+                ClientSize = new Size(Math.Max(minW - 16, cw), Math.Max(minH - 36, ch));
+            }
+        }
 
         private float ComputeScale()
         {
@@ -254,6 +284,12 @@ namespace ZeroBox
                 _trayMenu.Items.Add(empty);
             }
 
+            if (_trayIcon != null)
+            {
+                string tip = Loc.F("ZeroBox v{0} ({1}/{2})", AppVersion, installedAdded, _mgr.Modules.Count);
+                _trayIcon.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+            }
+
             _trayMenu.Items.Add(new ToolStripSeparator());
             _trayMenu.Items.Add(Loc.T(_lang, "Check All Updates", "Güncellemeleri Denetle", "检查全部更新"), null, delegate { StartCheckAllUpdates(); });
             _trayMenu.Items.Add(Loc.T(_lang, "Exit ZeroBox", "ZeroBox'tan Çık", "退出 ZeroBox"), null, delegate { ExitAppCleanly(); });
@@ -264,7 +300,7 @@ namespace ZeroBox
             base.OnHandleCreated(e);
             _scale = ComputeScale();
             RebuildFonts();
-            MinimumSize = new Size(S(880), S(590));
+            ApplyClampedBounds(false);
             WinNative.ApplyDarkTitleBar(Handle, UiTheme.Bg, UiTheme.Text);
             WinNative.AllowWakeMessage(Handle);
             if (!_launch.DemoMode) StartCheckAllUpdates();
@@ -277,6 +313,7 @@ namespace ZeroBox
             {
                 Hide();
                 ShowInTaskbar = false;
+                Opacity = 1.0;
             }
         }
 
@@ -289,7 +326,16 @@ namespace ZeroBox
                 {
                     _scale = newDpi / 96f;
                     RebuildFonts();
-                    MinimumSize = new Size(S(880), S(590));
+                    ApplyClampedBounds(false);
+                    try
+                    {
+                        if (m.LParam != IntPtr.Zero)
+                        {
+                            WinNative.RECT suggested = (WinNative.RECT)Marshal.PtrToStructure(m.LParam, typeof(WinNative.RECT));
+                            Bounds = Rectangle.FromLTRB(suggested.Left, suggested.Top, suggested.Right, suggested.Bottom);
+                        }
+                    }
+                    catch { }
                     Invalidate();
                 }
             }
@@ -327,6 +373,7 @@ namespace ZeroBox
                 ShowInTaskbar = false;
                 return;
             }
+            _mgr.RequestCancelAll();
             base.OnFormClosing(e);
         }
 
@@ -334,6 +381,7 @@ namespace ZeroBox
         {
             if (disposing)
             {
+                _mgr.RequestCancelAll();
                 if (_uiTimer != null) { _uiTimer.Stop(); _uiTimer.Dispose(); _uiTimer = null; }
                 if (_trayIcon != null) { _trayIcon.Visible = false; _trayIcon.Dispose(); _trayIcon = null; }
                 if (_trayMenu != null) { _trayMenu.Dispose(); _trayMenu = null; }
@@ -345,8 +393,14 @@ namespace ZeroBox
 
         private void ShowToast(string msg)
         {
+            ShowToast(msg, UiTheme.Emerald);
+        }
+
+        private void ShowToast(string msg, Color col)
+        {
             _toastText = msg ?? "";
-            _toastUntil = DateTime.UtcNow.AddSeconds(4.5);
+            _toastColor = col;
+            _toastUntil = DateTime.UtcNow.AddSeconds(5.0);
             Invalidate();
         }
 
@@ -388,39 +442,79 @@ namespace ZeroBox
             _checkingUpdates = true;
             ShowToast(Loc.T(_lang, "Checking GitHub Releases for all 6 modules...",
                 "6 modül için GitHub sürümleri denetleniyor...",
-                "正在向 GitHub Releases 查询 6 个模块的最新版本..."));
+                "正在并发向 GitHub Releases 查询 6 个模块的最新版本..."), UiTheme.Cyan);
 
             bool useMirror = _cfg.UseMirror;
             ThreadPool.QueueUserWorkItem(delegate
             {
+                int total = _mgr.Modules.Count;
                 int okCnt = 0;
                 int updCnt = 0;
-                for (int i = 0; i < _mgr.Modules.Count; i++)
+                int remaining = total + 1; // 6 modules + ZeroBox self-check
+                bool sharedSkipApi = false;
+                ManualResetEvent allDone = new ManualResetEvent(false);
+
+                for (int i = 0; i < total; i++)
                 {
                     ToolModule m = _mgr.Modules[i];
-                    string err;
-                    if (_mgr.FetchLatestMetadata(m, useMirror, out err)) okCnt++;
-                    if (m.State == ModuleState.UpdateAvailable) updCnt++;
-                    SafeUi(delegate { Invalidate(); });
+                    ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        try
+                        {
+                            string err;
+                            bool localSkip = sharedSkipApi;
+                            if (_mgr.FetchLatestMetadata(m, useMirror, ref localSkip, out err))
+                                Interlocked.Increment(ref okCnt);
+                            if (localSkip) sharedSkipApi = true;
+                            if (m.State == ModuleState.UpdateAvailable)
+                                Interlocked.Increment(ref updCnt);
+                            SafeUi(delegate { Invalidate(); });
+                        }
+                        finally
+                        {
+                            if (Interlocked.Decrement(ref remaining) == 0) allDone.Set();
+                        }
+                    });
                 }
+
+                // Parallel ZeroBox self-update awareness check
+                string latestSelf = "";
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try
+                    {
+                        string tag = _mgr.CheckSelfLatestTag(useMirror);
+                        if (ModuleManager.IsUpdateNewer("v" + AppVersion, tag))
+                            latestSelf = tag;
+                    }
+                    finally
+                    {
+                        if (Interlocked.Decrement(ref remaining) == 0) allDone.Set();
+                    }
+                });
+
+                allDone.WaitOne(22000);
+                allDone.Dispose();
+
                 SafeUi(delegate
                 {
                     _checkingUpdates = false;
+                    _selfUpdateTag = latestSelf;
                     RebuildTrayMenu();
                     if (okCnt == 0)
-                        ShowToast(Loc.T(_lang, "Could not reach GitHub. Try toggling GitHub Mirror in the toolbar.",
+                        ShowToast(Loc.T(_lang, "Could not reach GitHub. Try enabling GitHub Mirror in the toolbar.",
                             "GitHub'a ulaşılamadı. Üst çubuktan Ayna (Mirror) seçeneğini deneyin.",
-                            "无法连接 GitHub，可尝试开启工具栏中的「加速镜像」开关。"));
+                            "无法连接 GitHub，可尝试开启工具栏中的「加速镜像」开关。"), UiTheme.Amber);
                     else if (updCnt > 0)
                         ShowToast(Loc.T(_lang,
                             Loc.F("Checked {0}/6 modules · {1} update(s) ready.", okCnt, updCnt),
                             Loc.F("{0}/6 modül denetlendi · {1} güncelleme hazır.", okCnt, updCnt),
-                            Loc.F("已检测 {0}/6 个模块 · 发现 {1} 个可用更新。", okCnt, updCnt)));
+                            Loc.F("已检测 {0}/6 个模块 · 发现 {1} 个可用更新。", okCnt, updCnt)), UiTheme.Amber);
                     else
                         ShowToast(Loc.T(_lang,
                             Loc.F("Checked {0}/6 modules · Everything is up to date.", okCnt),
                             Loc.F("{0}/6 modül denetlendi · Tümü güncel.", okCnt),
-                            Loc.F("已检测 {0}/6 个模块 · 全部为最新版本。", okCnt)));
+                            Loc.F("已检测 {0}/6 个模块 · 全部为最新版本。", okCnt)), UiTheme.Emerald);
                 });
             });
         }
@@ -449,28 +543,43 @@ namespace ZeroBox
                     if (ok)
                     {
                         RebuildTrayMenu();
-                        ShowToast(Loc.T(_lang,
-                            Loc.F("{0} {1} installed & SHA-256 verified.", m.Name, m.InstalledVersion),
-                            Loc.F("{0} {1} kuruldu ve SHA-256 doğrulandı.", m.Name, m.InstalledVersion),
-                            Loc.F("{0} {1} 安装完成并已通过 SHA-256 校验。", m.Name, m.InstalledVersion)));
+                        if (m.LastInstallShaVerified)
+                        {
+                            ShowToast(Loc.T(_lang,
+                                Loc.F("{0} {1} installed & SHA-256 verified.", m.Name, m.InstalledVersion),
+                                Loc.F("{0} {1} kuruldu ve SHA-256 doğrulandı.", m.Name, m.InstalledVersion),
+                                Loc.F("{0} {1} 安装完成并已通过 SHA-256 校验。", m.Name, m.InstalledVersion)), UiTheme.Emerald);
+                        }
+                        else
+                        {
+                            ShowToast(Loc.T(_lang,
+                                Loc.F("{0} {1} installed (PE/ZIP verified via mirror/fallback).", m.Name, m.InstalledVersion),
+                                Loc.F("{0} {1} kuruldu (PE/ZIP doğrulamalı).", m.Name, m.InstalledVersion),
+                                Loc.F("{0} {1} 安装完成（已通过 PE/ZIP 格式校验）。", m.Name, m.InstalledVersion)), UiTheme.Emerald);
+                        }
                     }
                     else
                     {
-                        _mgr.ScanLocalInstallations();
+                        // Reset only THIS module without touching sibling concurrent downloads
+                        m.State = ModuleState.NotInstalled;
+                        _mgr.ScanSingleModule(m);
+
+                        if (err == "CANCELED") return;
                         if (err == "RUNNING")
                         {
                             ShowToast(Loc.T(_lang,
                                 Loc.F("Please close {0} before updating it.", m.Name),
                                 Loc.F("Güncellemeden önce lütfen {0} uygulamasını kapatın.", m.Name),
-                                Loc.F("更新前请先关闭正在运行的 {0}。", m.Name)));
+                                Loc.F("更新前请先关闭正在运行的 {0}。", m.Name)), UiTheme.Amber);
                         }
                         else
                         {
                             m.ErrorText = err;
+                            if (m.State == ModuleState.NotInstalled) m.State = ModuleState.Error;
                             ShowToast(Loc.T(_lang,
                                 Loc.F("{0} download failed: {1}", m.Name, err),
                                 Loc.F("{0} indirilemedi: {1}", m.Name, err),
-                                Loc.F("{0} 下载失败：{1}", m.Name, err)));
+                                Loc.F("{0} 下载失败：{1}", m.Name, err)), UiTheme.Coral);
                         }
                     }
                     Invalidate();
@@ -485,19 +594,21 @@ namespace ZeroBox
             {
                 ShowToast(Loc.T(_lang, "Demo: Launching " + m.Name + (asAdmin ? " (Admin)" : ""),
                     "Demo: " + m.Name + " başlatılıyor" + (asAdmin ? " (Yönetici)" : ""),
-                    "演示：正在启动 " + m.Name + (asAdmin ? "（管理员）" : "")));
+                    "演示：正在启动 " + m.Name + (asAdmin ? "（管理员）" : "")), UiTheme.Cyan);
                 return;
             }
             string err;
             if (_mgr.LaunchModule(m, asAdmin, out err))
-                ShowToast(Loc.T(_lang, "Launched " + m.Name, m.Name + " başlatıldı.", "已启动 " + m.Name));
+                ShowToast(Loc.T(_lang, "Launched " + m.Name, m.Name + " başlatıldı.", "已启动 " + m.Name), UiTheme.Emerald);
+            else if (err == "UAC_CANCELED")
+                ShowToast(Loc.T(_lang, "Administrator elevation canceled.", "Yönetici izni iptal edildi.", "已取消管理员授权。"), UiTheme.Muted);
             else
-                ShowToast(Loc.T(_lang, "Launch failed: " + err, "Başlatılamadı: " + err, "启动失败：" + err));
+                ShowToast(Loc.T(_lang, "Launch failed: " + err, "Başlatılamadı: " + err, "启动失败：" + err), UiTheme.Coral);
         }
 
         private void HandleRemove(ToolModule m)
         {
-            if (m == null) return;
+            if (m == null || m.State == ModuleState.Downloading) return;
             string msg = Loc.T(_lang,
                 Loc.F("Remove module \"{0}\" from ZeroBox?", m.Name),
                 Loc.F("\"{0}\" modülünü ZeroBox'tan kaldırmak istiyor musunuz?", m.Name),
@@ -509,7 +620,7 @@ namespace ZeroBox
             if (_mgr.RemoveModule(m, out err))
             {
                 RebuildTrayMenu();
-                ShowToast(Loc.T(_lang, "Removed " + m.Name, m.Name + " kaldırıldı.", "已移除 " + m.Name));
+                ShowToast(Loc.T(_lang, "Removed " + m.Name, m.Name + " kaldırıldı.", "已移除 " + m.Name), UiTheme.Emerald);
                 Invalidate();
             }
             else if (err == "RUNNING")
@@ -517,11 +628,11 @@ namespace ZeroBox
                 ShowToast(Loc.T(_lang,
                     Loc.F("Please close {0} before removing it.", m.Name),
                     Loc.F("Kaldırmadan önce lütfen {0} uygulamasını kapatın.", m.Name),
-                    Loc.F("移除前请先关闭正在运行的 {0}。", m.Name)));
+                    Loc.F("移除前请先关闭正在运行的 {0}。", m.Name)), UiTheme.Amber);
             }
             else
             {
-                ShowToast(Loc.T(_lang, "Remove failed: " + err, "Kaldırılamadı: " + err, "移除失败：" + err));
+                ShowToast(Loc.T(_lang, "Remove failed: " + err, "Kaldırılamadı: " + err, "移除失败：" + err), UiTheme.Coral);
             }
         }
 
@@ -530,12 +641,21 @@ namespace ZeroBox
             if (m == null || _cardMenu == null) return;
             _ctxMod = m;
             _cardMenu.Items.Clear();
-            bool inst = (m.State == ModuleState.Installed || m.State == ModuleState.UpdateAvailable);
-            if (inst)
+
+            if (m.State == ModuleState.Downloading)
+            {
+                ToolStripMenuItem busy = new ToolStripMenuItem(Loc.T(_lang,
+                    Loc.F("Downloading {0}... ({1}%)", m.Name, m.ProgressPct),
+                    Loc.F("{0} indiriliyor... (%{1})", m.Name, m.ProgressPct),
+                    Loc.F("正在下载 {0}... ({1}%)", m.Name, m.ProgressPct)));
+                busy.Enabled = false;
+                _cardMenu.Items.Add(busy);
+            }
+            else if (m.State == ModuleState.Installed || m.State == ModuleState.UpdateAvailable)
             {
                 _cardMenu.Items.Add(Loc.T(_lang, "Launch " + m.Name, m.Name + " Başlat", "启动 " + m.Name), null, delegate { HandleLaunch(_ctxMod, false); });
                 _cardMenu.Items.Add(Loc.T(_lang, "Launch as Administrator", "Yönetici Olarak Başlat", "以管理员身份启动"), null, delegate { HandleLaunch(_ctxMod, true); });
-                _cardMenu.Items.Add(Loc.T(_lang, "Open Module Folder", "Modül Klasörünü Aç", "打开模块目录"), null, delegate { WinNative.OpenFolderSafe(_mgr.GetModuleDir(_ctxMod)); });
+                _cardMenu.Items.Add(Loc.T(_lang, "Open Module Folder", "Modül Klasörünü Aç", "打开模块目录"), null, delegate { WinNative.OpenFolderSafe(_mgr.GetOpenFolderPath(_ctxMod)); });
                 _cardMenu.Items.Add(new ToolStripSeparator());
                 _cardMenu.Items.Add(Loc.T(_lang, "Reinstall / Update", "Yeniden Kur / Güncelle", "重新安装 / 更新"), null, delegate { StartInstallOrUpdate(_ctxMod); });
                 _cardMenu.Items.Add(Loc.T(_lang, "Remove Module", "Modülü Kaldır", "移除模块"), null, delegate { HandleRemove(_ctxMod); });
@@ -551,6 +671,7 @@ namespace ZeroBox
 
         private void RestoreFromTray()
         {
+            Opacity = 1.0;
             ShowInTaskbar = true;
             Show();
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
@@ -561,6 +682,7 @@ namespace ZeroBox
         private void ExitAppCleanly()
         {
             _allowRealClose = true;
+            _mgr.RequestCancelAll();
             Close();
         }
 
@@ -577,7 +699,7 @@ namespace ZeroBox
                 ToolModule m = _mgr.Modules[i];
                 if (_filter == "installed" && m.State != ModuleState.Installed && m.State != ModuleState.UpdateAvailable) continue;
                 if (_filter == "updates" && m.State != ModuleState.UpdateAvailable) continue;
-                if (_filter == "available" && m.State != ModuleState.NotInstalled) continue;
+                if (_filter == "available" && m.State != ModuleState.NotInstalled && m.State != ModuleState.Error) continue;
                 list.Add(m);
             }
             return list;
@@ -602,7 +724,7 @@ namespace ZeroBox
                 ToolModule m = _mgr.Modules[i];
                 if (m.State == ModuleState.Installed) { installedCnt++; installedBytes += m.InstalledBytes; }
                 else if (m.State == ModuleState.UpdateAvailable) { installedCnt++; updatesCnt++; installedBytes += m.InstalledBytes; }
-                else if (m.State == ModuleState.NotInstalled) availCnt++;
+                else if (m.State == ModuleState.NotInstalled || m.State == ModuleState.Error) availCnt++;
             }
 
             using (StringFormat sfNear = new StringFormat(StringFormatFlags.NoWrap))
@@ -675,6 +797,18 @@ namespace ZeroBox
                     Rectangle uaRc = new Rectangle(rx - uaW, btnY, uaW, btnH);
                     DrawPill(g, "hdr_update_all", uaRc, uaTxt, UiTheme.Amber, true, sfCenter);
                     rx = uaRc.Left - S(8);
+                }
+
+                if (!string.IsNullOrEmpty(_selfUpdateTag))
+                {
+                    string suTxt = Loc.T(_lang, "ZeroBox " + _selfUpdateTag + " ↗", "ZeroBox " + _selfUpdateTag + " ↗", "新版本 " + _selfUpdateTag + " ↗");
+                    int suW = MeasurePillW(g, suTxt, _fPill, 9);
+                    if (rx - suW > verRc.Right + S(12))
+                    {
+                        Rectangle suRc = new Rectangle(rx - suW, btnY, suW, btnH);
+                        DrawPill(g, "hdr_self_update", suRc, suTxt, UiTheme.Emerald, true, sfCenter);
+                        rx = suRc.Left - S(8);
+                    }
                 }
 
                 string subTxt = Loc.T(_lang, "Modular Native Windows Toolbox · On-Demand Plugins",
@@ -772,15 +906,17 @@ namespace ZeroBox
         {
             _cardRects[m.Id] = rc;
             bool isInst = (m.State == ModuleState.Installed || m.State == ModuleState.UpdateAvailable);
-            Color bdCol = m.State == ModuleState.UpdateAvailable ? UiTheme.Amber
+            bool hasErr = (m.State == ModuleState.Error || !string.IsNullOrEmpty(m.ErrorText));
+            Color bdCol = hasErr ? UiTheme.Coral
+                : (m.State == ModuleState.UpdateAvailable ? UiTheme.Amber
                 : (m.State == ModuleState.Downloading ? UiTheme.Cyan
-                : (isInst ? Color.FromArgb(90, m.Accent) : UiTheme.Border));
+                : (isInst ? Color.FromArgb(90, m.Accent) : UiTheme.Border)));
 
             UiTheme.FillRounded(g, rc, S(10), UiTheme.Surface);
-            UiTheme.DrawRounded(g, rc, S(10), bdCol, (m.State == ModuleState.UpdateAvailable || m.State == ModuleState.Downloading) ? 1.4f : 1f);
+            UiTheme.DrawRounded(g, rc, S(10), bdCol, (hasErr || m.State == ModuleState.UpdateAvailable || m.State == ModuleState.Downloading) ? 1.4f : 1f);
 
             // Top left accent stripe
-            UiTheme.FillRounded(g, new RectangleF(rc.X + S(1), rc.Y + S(12), S(3.5f), rc.Height - S(24)), S(2), m.Accent);
+            UiTheme.FillRounded(g, new RectangleF(rc.X + S(1), rc.Y + S(12), S(3.5f), rc.Height - S(24)), S(2), hasErr ? UiTheme.Coral : m.Accent);
 
             int ix = rc.X + S(16);
             int topY = rc.Y + S(12);
@@ -798,6 +934,11 @@ namespace ZeroBox
             {
                 stTxt = Loc.T(_lang, "Downloading " + m.ProgressPct + "%", "İndiriliyor %" + m.ProgressPct, "下载中 " + m.ProgressPct + "%");
                 stCol = UiTheme.Cyan;
+            }
+            else if (hasErr)
+            {
+                stTxt = Loc.T(_lang, "Failed", "Hata", "下载失败");
+                stCol = UiTheme.Coral;
             }
             else if (m.State == ModuleState.UpdateAvailable)
             {
@@ -828,15 +969,19 @@ namespace ZeroBox
             using (SolidBrush bn = new SolidBrush(UiTheme.Text))
                 g.DrawString(m.Name, _fCardTitle, bn, new RectangleF(nx, topY - S(1), nameMaxW, S(20)), sfNear);
 
-            string catMeta = m.Category(_lang) + "  ·  " + (m.InstalledBytes > 0 ? ModuleManager.FormatBytes(m.InstalledBytes) : m.ApproxSize);
+            string sizeLbl = m.InstalledBytes > 0
+                ? ModuleManager.FormatBytes(m.InstalledBytes)
+                : (m.RemoteBytes > 0 ? ModuleManager.FormatBytes(m.RemoteBytes) : m.ApproxSize);
+            string catMeta = m.Category(_lang) + "  ·  " + sizeLbl;
             using (SolidBrush bc = new SolidBrush(UiTheme.Subtle))
                 g.DrawString(catMeta, _fSmall, bc, new RectangleF(nx, topY + S(19), nameMaxW, S(16)), sfNear);
 
-            // Description (2 lines cleanly wrapped)
+            // Description OR inline error summary
             int descY = topY + S(42);
             int descH = Math.Max(S(32), rc.Bottom - S(46) - descY);
-            using (SolidBrush bd = new SolidBrush(UiTheme.Muted))
-                g.DrawString(m.Description(_lang), _fBody, bd, new RectangleF(ix, descY, rc.Width - S(28), descH), sfWrap);
+            string bodyTxt = hasErr ? m.ErrorText : m.Description(_lang);
+            using (SolidBrush bd = new SolidBrush(hasErr ? UiTheme.Coral : UiTheme.Muted))
+                g.DrawString(bodyTxt, _fBody, bd, new RectangleF(ix, descY, rc.Width - S(28), descH), sfWrap);
 
             // Bottom Action Bar OR Progress Bar
             int actH = S(26);
@@ -853,7 +998,7 @@ namespace ZeroBox
             {
                 // Right-aligned Repo link pill
                 string repoTxt = "GitHub ↗";
-                int repoW = MeasurePillW(g, repoTxt, _fPill, 8);
+                int repoW = MeasurePillW(g, repoTxt, _fPill, 7);
                 Rectangle repoRc = new Rectangle(rc.Right - repoW - S(12), actY, repoW, actH);
                 DrawActionBtn(g, "repo_" + m.Id, repoRc, repoTxt, UiTheme.Muted, false, sfCenter);
 
@@ -861,39 +1006,46 @@ namespace ZeroBox
                 if (m.State == ModuleState.UpdateAvailable)
                 {
                     string uTxt = Loc.T(_lang, "Update", "Güncelle", "立即更新");
-                    int uw = MeasurePillW(g, uTxt, _fPill, 11);
+                    int uw = MeasurePillW(g, uTxt, _fPill, 9);
                     Rectangle ur = new Rectangle(bx, actY, uw, actH);
                     DrawActionBtn(g, "inst_" + m.Id, ur, uTxt, UiTheme.Amber, true, sfCenter);
-                    bx = ur.Right + S(6);
+                    bx = ur.Right + S(5);
 
                     string lTxt = Loc.T(_lang, "Launch", "Aç", "启动");
-                    int lw = MeasurePillW(g, lTxt, _fPill, 10);
+                    int lw = MeasurePillW(g, lTxt, _fPill, 8);
                     Rectangle lr = new Rectangle(bx, actY, lw, actH);
                     DrawActionBtn(g, "run_" + m.Id, lr, lTxt, m.Accent, false, sfCenter);
-                    bx = lr.Right + S(6);
+                    bx = lr.Right + S(5);
 
                     string rTxt = Loc.T(_lang, "Remove", "Kaldır", "移除");
-                    int rw = MeasurePillW(g, rTxt, _fPill, 9);
-                    if (bx + rw < repoRc.Left - S(4))
+                    int rw = MeasurePillW(g, rTxt, _fPill, 7);
+                    if (bx + rw <= repoRc.Left - S(4))
                         DrawActionBtn(g, "rem_" + m.Id, new Rectangle(bx, actY, rw, actH), rTxt, UiTheme.Coral, false, sfCenter);
                 }
                 else if (m.State == ModuleState.Installed)
                 {
                     string lTxt = Loc.T(_lang, "Launch", "Başlat", "启动");
-                    int lw = MeasurePillW(g, lTxt, _fPill, 12);
+                    int lw = MeasurePillW(g, lTxt, _fPill, 11);
                     Rectangle lr = new Rectangle(bx, actY, lw, actH);
                     DrawActionBtn(g, "run_" + m.Id, lr, lTxt, m.Accent, true, sfCenter);
                     bx = lr.Right + S(6);
 
                     string rTxt = Loc.T(_lang, "Remove", "Kaldır", "移除");
-                    int rw = MeasurePillW(g, rTxt, _fPill, 10);
-                    if (bx + rw < repoRc.Left - S(4))
+                    int rw = MeasurePillW(g, rTxt, _fPill, 9);
+                    if (bx + rw <= repoRc.Left - S(4))
                         DrawActionBtn(g, "rem_" + m.Id, new Rectangle(bx, actY, rw, actH), rTxt, UiTheme.Coral, false, sfCenter);
+                }
+                else if (m.State == ModuleState.Error)
+                {
+                    string retryTxt = Loc.T(_lang, "Retry Install", "Tekrar Dene", "重试安装");
+                    int iw = MeasurePillW(g, retryTxt, _fPill, 11);
+                    Rectangle ir = new Rectangle(bx, actY, iw, actH);
+                    DrawActionBtn(g, "inst_" + m.Id, ir, retryTxt, UiTheme.Coral, true, sfCenter);
                 }
                 else
                 {
                     string iTxt = Loc.T(_lang, "Install Module", "Modülü Kur", "一键安装");
-                    int iw = MeasurePillW(g, iTxt, _fPill, 12);
+                    int iw = MeasurePillW(g, iTxt, _fPill, 11);
                     Rectangle ir = new Rectangle(bx, actY, iw, actH);
                     DrawActionBtn(g, "inst_" + m.Id, ir, iTxt, m.Accent, true, sfCenter);
                 }
@@ -932,10 +1084,10 @@ namespace ZeroBox
             bool showToast = !string.IsNullOrEmpty(_toastText) && DateTime.UtcNow < _toastUntil;
             string leftTxt = showToast ? _toastText
                 : Loc.T(_lang,
-                    "Right-click any card for Run as Admin · Downloads are SHA-256 verified against GitHub Releases",
-                    "Yönetici çalıştırma için karta sağ tıklayın · Tüm indirmeler GitHub SHA-256 doğrulamalıdır",
-                    "右键卡片可管理员启动 · 所有模块直连 GitHub Releases 并进行 SHA-256 校验");
-            using (SolidBrush bf = new SolidBrush(showToast ? UiTheme.Emerald : UiTheme.Muted))
+                    "Double-click installed card to launch · Right-click for Run as Admin · SHA-256 verified",
+                    "Kurulu karta çift tıklayıp açın · Yönetici için sağ tıklayın · SHA-256 doğrulamalı",
+                    "双击已装卡片启动 · 右键可管理员运行 · GitHub Releases SHA-256 严格校验");
+            using (SolidBrush bf = new SolidBrush(showToast ? _toastColor : UiTheme.Muted))
                 g.DrawString(leftTxt, _fSmall, bf, new RectangleF(x, y, Math.Max(S(100), rx - x), h), sfNear);
         }
 
@@ -1109,6 +1261,23 @@ namespace ZeroBox
             }
         }
 
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            if (e.Button != MouseButtons.Left) return;
+            if (!string.IsNullOrEmpty(HitTest(e.Location))) return; // Let buttons handle themselves
+            foreach (KeyValuePair<string, Rectangle> kv in _cardRects)
+            {
+                if (kv.Value.Contains(e.Location))
+                {
+                    ToolModule m = FindModuleById(kv.Key);
+                    if (m != null && (m.State == ModuleState.Installed || m.State == ModuleState.UpdateAvailable))
+                        HandleLaunch(m, false);
+                    return;
+                }
+            }
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
@@ -1133,6 +1302,7 @@ namespace ZeroBox
             else if (id == "lang_tr") SwitchLanguage("tr");
             else if (id == "lang_zh") SwitchLanguage("zh");
             else if (id == "hdr_check") StartCheckAllUpdates();
+            else if (id == "hdr_self_update") WinNative.OpenUrlSafe(SelfReleaseUrl);
             else if (id == "hdr_update_all")
             {
                 for (int i = 0; i < _mgr.Modules.Count; i++)
@@ -1145,8 +1315,17 @@ namespace ZeroBox
                 _cfg.UseMirror = !_cfg.UseMirror;
                 if (!_launch.DemoMode) _cfg.Save();
                 ShowToast(_cfg.UseMirror
-                    ? Loc.T(_lang, "GitHub Mirror enabled (gh-proxy.org).", "GitHub Aynası açıldı (gh-proxy.org).", "已开启 GitHub 加速镜像 (gh-proxy.org)。")
-                    : Loc.T(_lang, "Switched to Direct GitHub.", "Doğrudan GitHub bağlantısına geçildi.", "已切换为 GitHub 直连。"));
+                    ? Loc.T(_lang, "GitHub Mirror enabled (ghfast.top + failover).", "GitHub Aynası açıldı (ghfast.top + yedekli).", "已开启 GitHub 加速镜像（ghfast.top + 多源容灾）。")
+                    : Loc.T(_lang, "Switched to Direct GitHub.", "Doğrudan GitHub bağlantısına geçildi.", "已切换为 GitHub 直连。"), UiTheme.Violet);
+
+                // If any module still lacks live release info, immediately retry check with new source!
+                if (!_launch.DemoMode && !_checkingUpdates)
+                {
+                    bool needCheck = false;
+                    for (int i = 0; i < _mgr.Modules.Count; i++)
+                        if (string.IsNullOrEmpty(_mgr.Modules[i].DownloadUrl)) { needCheck = true; break; }
+                    if (needCheck) StartCheckAllUpdates();
+                }
             }
             else if (id.StartsWith("inst_")) StartInstallOrUpdate(FindModuleById(id.Substring(5)));
             else if (id.StartsWith("run_")) HandleLaunch(FindModuleById(id.Substring(4)), false);
@@ -1172,7 +1351,7 @@ namespace ZeroBox
                     _startupCached = next;
                     ShowToast(next
                         ? Loc.T(_lang, "Added ZeroBox to Windows startup (minimized).", "ZeroBox Windows başlangıcına eklendi.", "已开启 ZeroBox 开机自启（托盘静默）。")
-                        : Loc.T(_lang, "Removed ZeroBox from Windows startup.", "ZeroBox başlangıçtan kaldırıldı.", "已关闭开机自启。"));
+                        : Loc.T(_lang, "Removed ZeroBox from Windows startup.", "ZeroBox başlangıçtan kaldırıldı.", "已关闭开机自启。"), UiTheme.Cyan);
                 }
             }
         }

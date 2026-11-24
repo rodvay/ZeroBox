@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/rodvay/ZeroBox/releases/latest"><img src="https://img.shields.io/github/v/release/rodvay/ZeroBox?style=flat-square&color=38bdf8" alt="最新版本"></a>
-  <img src="https://img.shields.io/badge/体积-~71%20KB-34d399?style=flat-square" alt="体积">
+  <img src="https://img.shields.io/badge/体积-~81%20KB-34d399?style=flat-square" alt="体积">
   <img src="https://img.shields.io/badge/系统-Windows%2010%20%2F%2011-0f172a?style=flat-square" alt="平台">
   <img src="https://img.shields.io/badge/依赖-零依赖单文件-a78bfa?style=flat-square" alt="零依赖">
   <a href="LICENSE"><img src="https://img.shields.io/badge/协议-MIT-fbbf24?style=flat-square" alt="MIT 协议"></a>
@@ -17,9 +17,9 @@
 
 ---
 
-**ZeroBox** 是一款仅 **~71 KB** 的原生单文件 Windows 10/11 **模块化工具箱与按需插件启动器**，专为 [**@rodvay**](https://github.com/rodvay) 零臃肿开源工具全家桶打造！
+**ZeroBox** 是一款仅 **~81 KB** 的原生单文件 Windows 10/11 **模块化工具箱与按需插件启动器**，专为 [**@rodvay**](https://github.com/rodvay) 零臃肿开源工具全家桶打造！
 
-无需再一个个手动下载、分散存放和逐个检查更新：只需一个 **71 KB** 的 `ZeroBox.exe`，按需一键安装、更新、启动或彻底卸载你真正需要的原生小工具 —— **绝不预装捆绑任何多余组件，零后台遥测，每次下载严格校验 SHA-256**。
+无需再一个个手动下载、分散存放和逐个检查更新：只需一个 **81 KB** 的 `ZeroBox.exe`，按需一键安装、更新、启动或彻底卸载你真正需要的原生小工具 —— **绝不预装捆绑任何多余组件，零后台遥测，每次下载严格执行 PE/ZIP 文件头 + SHA-256 校验**。
 
 ## 界面预览
 
@@ -40,11 +40,11 @@
 
 ## 核心特性
 
-- **真正按需加载的模块化架构：** ZeroBox 本体仅 **~71 KB**，不捆绑任何工具本体；点击「安装」才直接从官方 GitHub Releases 拉取对应模块，并整洁存放在 `%LOCALAPPDATA%\ZeroBox\modules\<模块名>\`。
-- **严格 SHA-256 哈希校验 + Zip-Slip 防护：** 每次下载 `.exe` 或便携 `.zip`（如 CorePulse）均与 GitHub 官方发布的 `SHA-256` 摘要严格比对，不一致立即中止；解压内置路径穿越（Zip-Slip）防护，且更新/卸载前自动检测进程占用。
-- **GitHub 直连 + 一键镜像加速 (`gh-proxy.org`)：** 自动请求 GitHub Releases API（遇到 API 限流自动无缝回退至 `/releases/latest` 重定向解析，永不卡死），顶栏提供一键 **GitHub / 镜像源** 切换，国内网络同样丝滑拉取。
-- **一键「全部更新」、管理员启动与无痕卸载：** 并行检测所有模块最新版本，支持一键批量更新；右键已安装卡片可直接「以管理员身份运行」或「打开所在目录」，卸载直接清理模块目录不留垃圾。
-- **统一系统托盘 + 快捷键 + 三语原生高分屏：** 最小化后只占 **1 个轻量系统托盘图标**，右键菜单列出所有已装模块一键秒开；内置 `F5` 检查更新、`Ctrl+1..6` 快捷启动、开机自启、Per-Monitor V2 高分屏适配、单实例互斥与 **简体中文 / English / Türkçe** 自动语言切换。
+- **真正按需加载的模块化架构：** ZeroBox 本体仅 **~81 KB**，不捆绑任何工具本体；点击「安装」才直接从官方 GitHub Releases 拉取对应模块，并整洁存放在 `%LOCALAPPDATA%\ZeroBox\modules\<模块名>\`。
+- **严格 SHA-256 + PE/ZIP 文件头校验 + 原子解压：** 每次下载自动校验文件头与最小体积（杜绝代理节点返回 HTML 错误页污染程序），并与 GitHub 官方 `SHA-256` 摘要严格比对；ZIP 模块（如 CorePulse）采用原子暂存区 + Zip-Slip 路径穿越防护（解压失败绝不破坏已有版本），并通过 `QueryFullProcessImageNameW` 跨提权精准检测进程占用。
+- **并发检测 + 三级镜像容灾加速 (`ghfast.top` / `gh-proxy`)：** 1 秒内并发查询全部 6 个模块与 ZeroBox 本体更新；遇到 API 限流自动无缝切换至 `/releases/latest` 重定向解析，顶栏一键 **GitHub / 加速镜像** 切换并支持三级节点自动容灾。
+- **一键「全部更新」、双击秒开、管理员启动与无痕卸载：** 双击已装卡片即可直接启动，右键可「以管理员身份启动」或直达程序目录，支持一键批量更新或彻底无痕卸载。
+- **统一系统托盘 + 快捷键 + 高分屏防溢出：** 最小化后只占 **1 个轻量系统托盘图标**，右键菜单列出所有已装模块一键秒开；内置 `F5` 刷新、`Ctrl+1..6` 快捷启动、无闪烁托盘开机自启、Per-Monitor V2 高分屏适配、单实例互斥与 **简体中文 / English / Türkçe** 自动语言切换。
 
 ## 下载与使用
 
@@ -54,8 +54,8 @@
 
 ### 本地零依赖编译
 
-```powershell
-.\build.ps1
+```bat
+build.bat
 ```
 
 ## 社区与友情链接

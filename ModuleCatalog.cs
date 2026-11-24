@@ -29,8 +29,8 @@ namespace ZeroBox
         public string ApproxSize;
         public string FallbackTag;
 
-        // Live runtime state
-        public ModuleState State = ModuleState.NotInstalled;
+        // Live runtime state (mutated safely via ModuleManager)
+        public volatile ModuleState State = ModuleState.NotInstalled;
         public string InstalledVersion = "";
         public string InstalledExePath = "";
         public long InstalledBytes;
@@ -40,7 +40,8 @@ namespace ZeroBox
         public string ExpectedSha256 = "";
         public long RemoteBytes;
 
-        public int ProgressPct;
+        public volatile int ProgressPct;
+        public bool LastInstallShaVerified;
         public string ErrorText = "";
 
         public string RepoUrl { get { return "https://github.com/" + RepoOwner + "/" + RepoName; } }

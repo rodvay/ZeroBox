@@ -1,0 +1,9 @@
+*.exe
+*.ico
+*.pdb
+*.log
+*.tmp
+ZeroBox_Modules/
+.vs/
+bin/
+obj/

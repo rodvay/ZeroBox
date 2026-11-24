@@ -7,12 +7,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rodvay/ZeroBox/releases/latest"><img src="https://img.shields.io/github/v/release/rodvay/ZeroBox?style=flat-square&color=38bdf8" alt="Release"></a>
-  <img src="https://img.shields.io/badge/size-~81%20KB-34d399?style=flat-square" alt="Size">
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0f172a?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/dependencies-Zero-a78bfa?style=flat-square" alt="Zero Dependencies">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-fbbf24?style=flat-square" alt="MIT License"></a>
-  <a href="https://linux.do"><img src="https://img.shields.io/badge/Community-LINUX%20DO-1C1C1E?style=flat-square&logo=linux&logoColor=38BDF8" alt="LINUX DO Community"></a>
+  <a href="https://github.com/rodvay/ZeroBox/releases/latest"><img src="assets/badges/release-en.svg" alt="Release"></a>
+  <img src="assets/badges/size-en.svg" alt="Size">
+  <img src="assets/badges/platform-en.svg" alt="Platform">
+  <img src="assets/badges/deps-en.svg" alt="Zero Dependencies">
+  <a href="LICENSE"><img src="assets/badges/license-en.svg" alt="MIT License"></a>
+  <a href="https://linux.do"><img src="assets/badges/linuxdo-en.svg" alt="LINUX DO Community"></a>
 </p>
 
 ---

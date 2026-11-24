@@ -7,12 +7,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rodvay/ZeroBox/releases/latest"><img src="https://img.shields.io/github/v/release/rodvay/ZeroBox?style=flat-square&color=38bdf8" alt="最新版本"></a>
-  <img src="https://img.shields.io/badge/体积-~81%20KB-34d399?style=flat-square" alt="体积">
-  <img src="https://img.shields.io/badge/系统-Windows%2010%20%2F%2011-0f172a?style=flat-square" alt="平台">
-  <img src="https://img.shields.io/badge/依赖-零依赖单文件-a78bfa?style=flat-square" alt="零依赖">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/协议-MIT-fbbf24?style=flat-square" alt="MIT 协议"></a>
-  <a href="https://linux.do"><img src="https://img.shields.io/badge/开源社区-LINUX%20DO-1C1C1E?style=flat-square&logo=linux&logoColor=38BDF8" alt="LINUX DO 社区"></a>
+  <a href="https://github.com/rodvay/ZeroBox/releases/latest"><img src="assets/badges/release-zh.svg" alt="最新版本"></a>
+  <img src="assets/badges/size-zh.svg" alt="体积">
+  <img src="assets/badges/platform-zh.svg" alt="平台">
+  <img src="assets/badges/deps-zh.svg" alt="零依赖">
+  <a href="LICENSE"><img src="assets/badges/license-zh.svg" alt="MIT 协议"></a>
+  <a href="https://linux.do"><img src="assets/badges/linuxdo-zh.svg" alt="LINUX DO 社区"></a>
 </p>
 
 ---
